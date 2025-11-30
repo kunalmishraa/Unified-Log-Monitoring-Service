@@ -3,16 +3,19 @@ import fetch from "node-fetch";
 
 const githubToken = process.env.GITHUB_TOKEN;
 const perplexityKey = process.env.PERPLEXITY_API_KEY;
-const [owner, repo] = process.env.REPO_FULL.split("/");
+const repoFull = process.env.REPO_FULL;
 const prNumber = process.env.PR_NUMBER;
 
-if (!githubToken || !perplexityKey) {
-  console.error("Missing GITHUB_TOKEN or PERPLEXITY_API_KEY");
+if (!githubToken || !perplexityKey || !repoFull || !prNumber) {
+  console.error("Missing required environment variables (GITHUB_TOKEN, PERPLEXITY_API_KEY, REPO_FULL, PR_NUMBER).");
   process.exit(1);
 }
 
-async function getPRDiff() {
+const [owner, repo] = repoFull.split("/");
+
+async function getPRAndDiff() {
   const prUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;
+
   const prRes = await fetch(prUrl, {
     headers: {
       "Authorization": `Bearer ${githubToken}`,
@@ -22,7 +25,7 @@ async function getPRDiff() {
   });
 
   if (!prRes.ok) {
-    console.error("Failed to fetch PR:", await prRes.text());
+    console.error("Failed to fetch PR:", prRes.status, await prRes.text());
     process.exit(1);
   }
 
@@ -36,7 +39,7 @@ async function getPRDiff() {
   });
 
   if (!diffRes.ok) {
-    console.error("Failed to fetch diff:", await diffRes.text());
+    console.error("Failed to fetch diff:", diffRes.status, await diffRes.text());
     process.exit(1);
   }
 
@@ -53,9 +56,9 @@ async function callPerplexityReview(pr, diff) {
       {
         role: "system",
         content:
-          "You are a senior backend engineer reviewing a pull request in a Spring Boot + ELK + Redis + MongoDB project. " +
-          "Review code quality, architecture, error handling, testing, logging, and Docker/configuration changes. " +
-          "Respond in markdown with sections: Summary, Strengths, Issues, Suggestions, Tests to Add."
+          "You are a senior backend engineer reviewing a pull request in a Java Spring Boot + Elasticsearch + MongoDB + Redis + Docker project. " +
+          "Focus on code quality, architecture, logging, error handling, security, test coverage, and configuration. " +
+          "Respond in GitHub-flavored markdown with clear sections: Summary, Strengths, Issues, Suggestions, Tests to Add."
       },
       {
         role: "user",
@@ -79,7 +82,7 @@ async function callPerplexityReview(pr, diff) {
   });
 
   if (!res.ok) {
-    console.error("Perplexity API error:", await res.text());
+    console.error("Perplexity API error:", res.status, await res.text());
     process.exit(1);
   }
 
@@ -88,8 +91,9 @@ async function callPerplexityReview(pr, diff) {
   return content;
 }
 
-async function createPRComment(body) {
+async function postPRComment(commentBody) {
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments`;
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -97,24 +101,28 @@ async function createPRComment(body) {
       "Accept": "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28"
     },
-    body: JSON.stringify({ body })
+    body: JSON.stringify({ body: commentBody })
   });
 
   if (!res.ok) {
-    console.error("Failed to post comment:", await res.text());
+    console.error("Failed to post PR comment:", res.status, await res.text());
     process.exit(1);
   }
 }
 
 (async () => {
   try {
-    const { pr, diff } = await getPRDiff();
+    console.log(`Running AI PR review for ${owner}/${repo}#${prNumber}...`);
+
+    const { pr, diff } = await getPRAndDiff();
     const review = await callPerplexityReview(pr, diff);
+
     const commentBody = `### 🤖 AI PR Review (Perplexity)\n\n${review}`;
-    await createPRComment(commentBody);
-    console.log("AI PR review posted.");
-  } catch (e) {
-    console.error("AI PR review failed:", e);
+    await postPRComment(commentBody);
+
+    console.log("AI PR review comment posted successfully.");
+  } catch (err) {
+    console.error("AI PR review failed:", err);
     process.exit(1);
   }
 })();

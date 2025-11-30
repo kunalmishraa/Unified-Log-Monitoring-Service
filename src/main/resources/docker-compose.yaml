@@ -1,0 +1,15 @@
+services:
+  log-platform:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - MONGODB_URL=mongodb://admin:password@mongodb:27017/logplatform
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+      - mongodb
+      - redis
